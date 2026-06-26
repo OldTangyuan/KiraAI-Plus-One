@@ -66,10 +66,11 @@ class PlusOne(BasePlugin):
 
     # ── 消息发送 ──────────────────────────────
 
-    async def send_notice(self, session_id: str, content: str):
+    async def send_notice(self, session_str: str, content: str):
+        """session_str 格式: adapter_name:gm|dm:id"""
         chain = MessageChain([Text(content)])
         await self.ctx.publish_notice(
-            session=session_id,
+            session=session_str,
             chain=chain,
             is_mentioned=True,
         )
@@ -126,7 +127,7 @@ class PlusOne(BasePlugin):
             }
             self._last_triggered = target
             await self.send_notice(
-                session_id,
+                str(event.session),
                 f'[System: 群友正在复读输出"{event.message_repr}"，如需加入，请使用<+1>Tag加入复读]',
             )
             self._reset_state(state)
