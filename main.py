@@ -144,7 +144,7 @@ class PlusOne(BasePlugin):
             target = {
                 "ada_name": event.session.adapter_name,
                 "group_id": event.message.group.group_id,
-                "text": state["cached_cache_output"],
+                "text": state["cache_output"],
             }
             self._last_triggered = target
             await self.send_notice(
