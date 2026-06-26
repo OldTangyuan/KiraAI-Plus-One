@@ -1,0 +1,27 @@
+{
+  "min_nums": {
+    "type": "integer",
+    "name": "最小+1条数",
+    "default": 2,
+    "hint": "至少多少条才执行+1（必须大于2）"
+  },
+  "max_nums": {
+    "type": "integer",
+    "name": "最大+1条数",
+    "default": 5,
+    "hint": "最多多少条才执行+1（必须大于最小+1条数）"
+  },
+  "mode": {
+    "type": "enum",
+    "name": "模式",
+    "default": "random",
+    "options": ["random", "fixed"],
+    "hint": "运行模式（random: 随机, fixed: 固定以最小+1条数执行+1）"
+  },
+  "disallowed_sessions": {
+    "type": "list",
+    "name": "禁止的会话",
+    "default": [],
+    "hint": "留空表示不限制，每行一个会话 ID"
+  }
+}
