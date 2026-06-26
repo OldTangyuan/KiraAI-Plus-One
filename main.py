@@ -112,12 +112,16 @@ class PlusOne(BasePlugin):
         if session_id in self.disallowed_sessions:
             return
 
+        # 跳过系统通知类消息，避免自循环导致状态污染
+        if event.is_notice:
+            return
+
         # 只对纯文本消息进行复读检测，避免图片/回复/转发等不可重新发送的元素
         if not _is_text_only(event.message.chain):
             return
 
         current = _extract_text(event.message.chain)
-        if not current.strip():
+        if not current:
             return
 
         state = self._get_state(session_id)
