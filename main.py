@@ -66,10 +66,11 @@ class PlusOne(BasePlugin):
 
     # ── 消息发送 ──────────────────────────────
 
-    async def send_notice(self, session_id: str, content: str):
+    async def send_notice(self, session_str: str, content: str):
+        """session_str 格式: adapter_name:gm|dm:id"""
         chain = MessageChain([Text(content)])
         await self.ctx.publish_notice(
-            session=session_id,
+            session=session_str,
             chain=chain,
             is_mentioned=True,
         )
@@ -126,12 +127,12 @@ class PlusOne(BasePlugin):
             }
             self._last_triggered = target
             await self.send_notice(
-                session_id,
+                str(event.session),
                 f'[System: 群友正在复读输出"{event.message_repr}"，如需加入，请使用<+1>Tag加入复读]',
             )
             self._reset_state(state)
 
-    @register.tag(name="+1", description="使用<+1>Tag可以进行+1复读操作，与群友一起快乐地复读")
+    @register.tag(name="+1", description="使用<+1>Tag可以进行+1复读操作，与群友一起快乐地复读，输出“<msg>\n\t<+1>Yes</+1>\n</msg>”时表示进行+1操作，外部的Tag要和正常消息一样")
     async def handle_plus_one_tag(self, value: str, **kwargs) -> list:
         if "yes" in value.lower():
             await self.plus_one(self._last_triggered)
