@@ -10,9 +10,14 @@ from pathlib import Path
 logger = get_logger('plugin-PlusOne', 'orange')
 
 
-def _chain_repr(chain: MessageChain) -> str:
-    """MessageChain 没有定义 __eq__，用元素 repr 拼接来比较内容是否相同"""
-    return "|".join(ele.repr for ele in chain)
+def _is_text_only(chain: MessageChain) -> bool:
+    """判断消息是否仅包含 Text 元素（只有纯文本消息才能安全复读）"""
+    return all(isinstance(ele, Text) for ele in chain)
+
+
+def _extract_text(chain: MessageChain) -> str:
+    """提取 MessageChain 中的纯文本内容"""
+    return "".join(ele.text for ele in chain if isinstance(ele, Text))
 
 
 class PlusOne(BasePlugin):
@@ -48,8 +53,8 @@ class PlusOne(BasePlugin):
         if session_id not in self._session_states:
             self._session_states[session_id] = {
                 "count": 1,
-                "cache_output": None,        # 上一条收到的消息
-                "cached_cache_output": None,  # 上上条消息（触发复读后变成 "被复读的内容"）
+                "cache_output": None,        # 上一条收到的消息（纯文本）
+                "cached_cache_output": None,  # 上上条消息，即"被复读的内容"（纯文本）
                 "threshold": self._calc_threshold(),
             }
         return self._session_states[session_id]
@@ -75,23 +80,28 @@ class PlusOne(BasePlugin):
             is_mentioned=True,
         )
 
-    async def send_to_group(self, ada_name, group_id, content):
-        chain = content if isinstance(content, MessageChain) else MessageChain([Text(content)])
+    async def send_to_group(self, ada_name, group_id, text: str):
+        """向群组发送纯文本消息"""
+        chain = MessageChain([Text(text)])
         await self.ctx.adapter_mgr.get_adapter(ada_name).send_group_message(
             group_id=group_id,
             send_message_obj=chain,
         )
 
     async def plus_one(self, target: dict):
-        """执行 +1 复读，向 target 发送缓存的被复读消息"""
+        """执行 +1 复读，向 target 发送缓存的被复读文本"""
         if not target:
             logger.warning("+1 被调用但无可用的复读目标")
+            return
+        text = target.get("text", "").strip()
+        if not text:
+            logger.warning("+1 被调用但复读内容为空")
             return
         logger.info("+1")
         await self.send_to_group(
             target["ada_name"],
             target["group_id"],
-            target["cached_cache_output"],
+            text,
         )
 
     # ── 事件处理 ──────────────────────────────
@@ -102,33 +112,40 @@ class PlusOne(BasePlugin):
         if session_id in self.disallowed_sessions:
             return
 
+        # 只对纯文本消息进行复读检测，避免图片/回复/转发等不可重新发送的元素
+        if not _is_text_only(event.message.chain):
+            return
+
+        current = _extract_text(event.message.chain)
+        if not current.strip():
+            return
+
         state = self._get_state(session_id)
-        current = _chain_repr(event.message.chain)
 
         # 与已触发的复读内容相同 → 不参与计数
         if state["cached_cache_output"] is not None and \
-           _chain_repr(state["cached_cache_output"]) == current:
+           state["cached_cache_output"] == current:
             return
 
         # 与上一条消息相同 → 计数 +1；否则新内容，重置计数
         if state["cache_output"] is not None and \
-           _chain_repr(state["cache_output"]) == current:
+           state["cache_output"] == current:
             state["count"] += 1
         else:
             state["count"] = 1
 
-        state["cache_output"] = event.message.chain
+        state["cache_output"] = current
 
         if state["count"] >= state["threshold"]:
             target = {
                 "ada_name": event.session.adapter_name,
                 "group_id": event.message.group.group_id,
-                "cached_cache_output": state["cached_cache_output"],
+                "text": state["cached_cache_output"],
             }
             self._last_triggered = target
             await self.send_notice(
                 str(event.session),
-                f'[System: 群友正在复读输出"{event.message_repr}"，如需加入，请使用<+1>Tag加入复读]',
+                f'[System: 群友正在复读输出"{event.message_repr}"，如需加入，请使用<plus1>Tag加入复读]',
             )
             self._reset_state(state)
 
