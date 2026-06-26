@@ -132,7 +132,7 @@ class PlusOne(BasePlugin):
             )
             self._reset_state(state)
 
-    @register.tag(name="+1", description="使用<+1>Tag可以进行+1复读操作，与群友一起快乐地复读，输出“<msg>\n\t<+1>Yes</+1>\n</msg>”时表示进行+1操作，外部的Tag要和正常消息一样")
+    @register.tag(name="plus1", description="使用<plus1>Tag可以进行+1复读操作，与群友一起快乐地复读，输出“<msg>\n\t<plus1>Yes</plus1>\n</msg>”时表示进行+1操作，外部的Tag要和正常消息一样")
     async def handle_plus_one_tag(self, value: str, **kwargs) -> list:
         if "yes" in value.lower():
             await self.plus_one(self._last_triggered)
