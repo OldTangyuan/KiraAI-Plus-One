@@ -1,8 +1,8 @@
 {
-    "display_name": "Plus One",
-    "plugin_id": "KiraAI-Plus-One",
-    "version": "1.0",
-    "author": "Old_tangyuan",
-    "description": "让你的AI也能愉快地在群聊+1",
-    "repo": "https://github.com/OldTangyuan/KiraAI-Plus-One"
-  }
+  "display_name": "Plus One",
+  "plugin_id": "KiraAI-Plus-One",
+  "version": "1.1",
+  "author": "Old_tangyuan",
+  "description": "让你的AI也能愉快地在群聊+1",
+  "repo": "https://github.com/OldTangyuan/KiraAI-Plus-One"
+}
