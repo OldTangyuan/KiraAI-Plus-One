@@ -23,5 +23,23 @@
     "name": "禁止的会话",
     "default": [],
     "hint": "留空表示不限制，每行一个会话 ID"
+  },
+  "blacklist": {
+    "type": "list",
+    "name": "复读黑名单词",
+    "default": [],
+    "hint": "包含以下词语的消息将不参与复读检测，每行一个词"
+  },
+  "enable_interrupt": {
+    "type": "switch",
+    "name": "允许打断复读",
+    "default": false,
+    "hint": "启用后，AI 可选择输出 <plus1>No</plus1> 发送自定义内容来打断别人的复读"
+  },
+  "interrupt_message": {
+    "type": "string",
+    "name": "打断内容",
+    "default": "打断！",
+    "hint": "AI 选择打断复读时发送到群里的内容（需先启用“允许打断复读”）"
   }
 }
