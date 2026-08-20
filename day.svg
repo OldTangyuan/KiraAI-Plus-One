@@ -1,0 +1,21 @@
+<!-- 白天主题 +1 图标 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
+  <defs>
+    <linearGradient id="dayBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f8fafc"/>
+    </linearGradient>
+    <filter id="dayShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#0f172a" flood-opacity="0.05"/>
+    </filter>
+  </defs>
+  
+  <!-- 背景底板 -->
+  <rect width="64" height="64" rx="14" fill="url(#dayBg)" stroke="#e2e8f0" stroke-width="2" filter="url(#dayShadow)"/>
+  
+  <!-- 加号 "+" -->
+  <text x="24" y="32" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-weight="700" font-size="28" fill="#0f172a" text-anchor="middle" dominant-baseline="central">+</text>
+  
+  <!-- 数字 "1" -->
+  <text x="41" y="32" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-weight="900" font-size="36" fill="#0f172a" text-anchor="middle" dominant-baseline="central">1</text>
+</svg>

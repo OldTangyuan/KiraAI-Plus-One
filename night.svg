@@ -1,0 +1,21 @@
+<!-- 黑夜主题 +1 图标 -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="100%" height="100%">
+  <defs>
+    <linearGradient id="nightBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <filter id="nightShadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  
+  <!-- 背景底板 -->
+  <rect width="64" height="64" rx="14" fill="url(#nightBg)" stroke="#334155" stroke-width="2" filter="url(#nightShadow)"/>
+  
+  <!-- 加号 "+" -->
+  <text x="24" y="32" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-weight="700" font-size="28" fill="#f8fafc" text-anchor="middle" dominant-baseline="central">+</text>
+  
+  <!-- 数字 "1" -->
+  <text x="41" y="32" font-family="'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-weight="900" font-size="36" fill="#f8fafc" text-anchor="middle" dominant-baseline="central">1</text>
+</svg>
