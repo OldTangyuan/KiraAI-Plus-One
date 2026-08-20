@@ -3,6 +3,9 @@
   "plugin_id": "KiraAI-Plus-One",
   "version": "1.2",
   "author": "Old_tangyuan",
+  "tags": ["utility", "automation"],
   "description": "让你的AI也能愉快地在群聊+1",
   "repo": "https://github.com/OldTangyuan/KiraAI-Plus-One"
+  "icon": "day.svg",
+  "icon-dark": "night.svg",
 }
