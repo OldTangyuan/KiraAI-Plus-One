@@ -4,8 +4,11 @@ from core.chat import KiraMessageEvent, MessageChain
 from core.chat.message_elements import Text, Sticker
 from core.plugin import on, Priority
 
+import asyncio
+import hashlib
 import random
 import re
+import time
 from pathlib import Path
 
 logger = get_logger('plugin-PlusOne', 'orange')
@@ -13,6 +16,18 @@ logger = get_logger('plugin-PlusOne', 'orange')
 # 形如 "<!--PIR:...-->" / "<!--xxx-->" 的整段纯占位符文本，一般是媒体/贴纸消息
 # 在转文本过程中留下的占位标记，不是真实可复读的聊天内容，禁止参与复读计数。
 _PLACEHOLDER_ONLY_RE = re.compile(r"^\s*<!--[\s\S]*?-->\s*$")
+
+# 会话状态空闲多久后清理（秒）
+_STATE_IDLE_TTL = 30 * 60
+# 复读目标(_last_triggered) 过期时间：AI 在这之后输出 +1 视为无效，不再发送（秒）
+_TARGET_TTL = 10 * 60
+# 后台清理任务间隔（秒）
+_PRUNE_INTERVAL = 60
+
+
+def _digest(s: str) -> str:
+    """把任意字符串折叠为定长 md5 摘要，避免在会话状态中长期保存大段文本/二进制"""
+    return hashlib.md5((s or "").encode("utf-8", errors="replace")).hexdigest()
 
 
 def _is_repeatable_element(ele) -> bool:
@@ -65,17 +80,24 @@ def _clone_repeatable_chain(chain: MessageChain) -> MessageChain:
     return MessageChain(elements)
 
 
-def _chain_signature(chain: MessageChain) -> tuple:
+async def _chain_signature(chain: MessageChain) -> tuple:
     """计算消息链的结构签名，用于判断两条消息是否“相同内容”。
-    文本按原文比较；表情包按 sticker_id / 贴纸内容(sticker 字段)比较，
-    只有相同表情包才会被算作复读。"""
+    文本与表情包内容都折叠成定长 md5，避免把大段文本/贴纸 base64 常驻在会话状态里。
+    注意：hash_image() 是 async 方法，必须 await；计算失败时回退为内容原文的摘要，
+    不会因个别贴纸无法取码而导致钩子异常。"""
     sig = []
     for ele in chain:
         if isinstance(ele, Text):
-            sig.append(("text", ele.text))
+            sig.append(("text", _digest(ele.text)))
         elif isinstance(ele, Sticker):
-            # QQ 收到的同一表情包来自同一资源，sticker 内容(base64)一致
-            sig.append(("sticker", ele.sticker_id, ele.sticker or ""))
+            digest = None
+            try:
+                digest = await ele.hash_image()
+            except Exception:
+                digest = None
+            # 兜底：hash 失败时对原始内容做摘要，保证可判等且不持有大体积原文
+            sig.append(("sticker", str(ele.sticker_id) if ele.sticker_id is not None else "",
+                        digest or _digest(ele.sticker or "")))
     return tuple(sig)
 
 
@@ -98,6 +120,7 @@ class PlusOne(BasePlugin):
         super().__init__(ctx, cfg)
         self.data_dir: Path = None
         self.output_dir: Path = None
+        self._task: asyncio.Task = None
 
     async def initialize(self):
         """插件加载时调用，在此初始化资源、注册事件等"""
@@ -112,10 +135,14 @@ class PlusOne(BasePlugin):
         self.enable_interrupt = bool(self.plugin_cfg.get("enable_interrupt", False))
         self.interrupt_message = self.plugin_cfg.get("interrupt_message", "打断！")
 
-        # key=sid ("adapter_name:gm|dm:id"), value=会话状态
+        # key=sid ("adapter_name:gm:group_id"), value=会话状态
+        # 状态只保存小体积字段：计数、阈值、最近/已触发内容的“签名”(定长 md5)、最后活跃时间
         self._session_states: dict[str, dict] = {}
-        # 最近一次触发复读的群目标，供 +1/打断 tag 使用
+        # 最近一次触发复读的群目标（含待重发的消息链克隆），供 +1/打断 tag 使用
         self._last_triggered: dict = None
+
+        # 后台定期清理空闲会话状态与过期复读目标
+        self._task = asyncio.create_task(self._prune_loop())
 
         # 依据配置动态更新 plus1 tag 描述，控制 AI 是否知道可以打断复读
         self._update_tag_description()
@@ -123,7 +150,38 @@ class PlusOne(BasePlugin):
         logger.info('PlusOne 插件加载完成！')
 
     async def terminate(self):
-        pass
+        # 必须可重入：热重载会再次调用
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        self._task = None
+        self._session_states.clear()
+        self._last_triggered = None
+
+    # ── 后台清理 ──────────────────────────────
+
+    async def _prune_loop(self):
+        try:
+            while True:
+                await asyncio.sleep(_PRUNE_INTERVAL)
+                self._prune()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.exception("后台清理任务出错")
+
+    def _prune(self):
+        """清理空闲过久的会话状态，以及过期未消费的复读目标（释放其中的贴纸克隆等大对象）"""
+        now = time.time()
+        for sid in [s for s, st in self._session_states.items()
+                    if now - st.get("ts", 0) > _STATE_IDLE_TTL]:
+            self._session_states.pop(sid, None)
+            logger.debug(f"清理空闲会话状态: {sid}")
+        if self._last_triggered and now - self._last_triggered.get("ts", 0) > _TARGET_TTL:
+            self._last_triggered = None
 
     # ── plus1 tag 描述管理 ──────────────────────────────
 
@@ -173,20 +231,22 @@ class PlusOne(BasePlugin):
         if sid not in self._session_states:
             self._session_states[sid] = {
                 "count": 1,
-                # cache = 最近收到的一条可复读消息（复读候选）
-                # cached = 已触发过复读的那条内容，用来避免同一内容反复触发
+                # cache = 最近一条可复读消息的“签名”（定长，无大对象）
+                # cached = 已触发过复读的内容签名，防止同一内容反复触发
                 "cache": None,
                 "cached": None,
                 "threshold": self._calc_threshold(),
+                "ts": time.time(),
             }
         return self._session_states[sid]
 
     def _calc_threshold(self) -> int:
         return random.randint(self.min_nums, self.max_nums) if self.mode == "random" else self.min_nums
 
-    def _reset_state(self, state: dict):
-        """触发复读后将当前消息归档为 cached，重置计数"""
-        state["cached"] = state["cache"]
+    def _reset_state(self, state: dict, sig: tuple):
+        """触发复读后将当前内容签名归档为 cached，重置计数。
+        只保留定长签名，不保留任何大体积内容。"""
+        state["cached"] = sig
         state["cache"] = None
         state["count"] = 1
         state["threshold"] = self._calc_threshold()
@@ -226,9 +286,13 @@ class PlusOne(BasePlugin):
         )
 
     async def plus_one(self, target: dict):
-        """执行 +1 复读：把缓存的被复读消息链（文本或表情包）原样发到群里"""
+        """执行 +1 复读：把待复读的消息链（文本或表情包）原样发到群里"""
         if not target:
             logger.warning("+1 被调用但无可用的复读目标")
+            return
+        # 目标过期（AI 回复太晚）→ 不再发送
+        if time.time() - target.get("ts", 0) > _TARGET_TTL:
+            logger.info("+1 目标已过期，忽略")
             return
         chain = target.get("chain")
         if chain is None:
@@ -252,6 +316,9 @@ class PlusOne(BasePlugin):
         """AI 选择打断复读时，向 target 所在的群发送自定义的打断内容"""
         if not target:
             logger.warning("打断被调用但无可用的复读目标")
+            return
+        if time.time() - target.get("ts", 0) > _TARGET_TTL:
+            logger.info("打断目标已过期，忽略")
             return
         logger.info("打断复读")
         await self.send_to_group(
@@ -300,52 +367,54 @@ class PlusOne(BasePlugin):
             return
 
         state = self._get_state(sid)
+        state["ts"] = time.time()
 
-        sig = _chain_signature(chain)
+        # 签名只含定长 md5，会话状态不会长期持有大段文本/贴纸 base64
+        sig = await _chain_signature(chain)
 
         # 与已触发过的复读内容相同 → 不参与计数
-        if state["cached"] is not None and state["cached"]["sig"] == sig:
+        if state["cached"] is not None and state["cached"] == sig:
             return
 
         # 与上一条消息相同 → 计数 +1；否则视为新内容，重置计数
-        if state["cache"] is not None and state["cache"]["sig"] == sig:
+        if state["cache"] is not None and state["cache"] == sig:
             state["count"] += 1
         else:
             state["count"] = 1
 
-        state["cache"] = {
-            "sig": sig,
-            "chain": _clone_repeatable_chain(chain),  # 稍后原样重发用
-            "text": text,
-            "desc": _describe_chain(chain),
-        }
+        state["cache"] = sig
 
         if state["count"] >= state["threshold"]:
-            target = {
+            # 只在触发时才克隆整条内容用于重发（当前消息与“被复读内容”相同），
+            # 未触发时内存里只有签名，不缓存贴纸/文本本体。
+            payload = _clone_repeatable_chain(chain)
+            self._last_triggered = {
                 "ada_name": event.session.adapter_name,
                 "group_id": event.message.group.group_id,
-                "chain": state["cache"]["chain"],
-                "desc": state["cache"]["desc"],
+                "chain": payload,
+                "ts": time.time(),
             }
-            self._last_triggered = target
-            is_sticker = _chain_has_sticker(state["cache"]["chain"])
-            desc = f'群友正在复读“{target["desc"]}”'
+            is_sticker = _chain_has_sticker(payload)
+            desc = f'群友正在复读“{_describe_chain(chain)}”'
             if is_sticker:
                 desc += '，这是一个表情包，加入后插件会原样发送该表情包'
             await self.send_notice(
                 sid,
                 f'[System: {desc}，如需加入，请仅输出“<msg>\n\t<plus1>Yes</plus1>\n</msg>”加入复读]',
             )
-            self._reset_state(state)
+            self._reset_state(state, sig)
 
     @register.tag(name="plus1", description="使用<plus1>Tag可以进行+1复读操作，与群友一起快乐地复读，输出“<msg>\n\t<plus1>Yes</plus1>\n</msg>”时表示进行+1操作")
     async def handle_plus_one_tag(self, value: str, **kwargs) -> list:
-        if "yes" in value.lower():
+        value = (value or "").lower()
+        if "yes" in value:
             target = self._last_triggered
             self._last_triggered = None
             await self.plus_one(target)
-        elif "no" in value.lower() and self.enable_interrupt:
+        elif "no" in value:
+            # 无论是否启用“打断”，输出 No 都视为放弃加入 → 清空目标
             target = self._last_triggered
             self._last_triggered = None
-            await self.interrupt(target)
+            if self.enable_interrupt:
+                await self.interrupt(target)
         return []
